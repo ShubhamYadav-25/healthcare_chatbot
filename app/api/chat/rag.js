@@ -19,7 +19,15 @@ export async function retrieveCondition(query) {
 
   const lower = query.toLowerCase();
 
-  const tokens = lower.replace(/[^\w\s]/g, "").split(/\s+/).map(token => symptomSynonyms[token] || token);
+  const tokens = lower
+  .replace(/[^\w\s]/g, "")
+  .split(/\s+/)
+  .map(token => {
+    if (token.endsWith("s")) {
+      return token.slice(0, -1);
+    }
+    return token;
+  });
 
   const docs = await collection.find({
   keywords: { $in: tokens }

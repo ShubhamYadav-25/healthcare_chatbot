@@ -86,7 +86,7 @@ export async function POST(request) {
     if (!state.activeDoc) {
       const ragResult = await retrieveCondition(userMessage);
 
-      if (ragResult?.doc) {
+      if (ragResult?.doc && ragResult.confidence > 0.3) {
         state.activeDoc = ragResult.doc;
         state.questionIndex = 0;
         state.confirmedSymptoms = [];
@@ -97,8 +97,7 @@ export async function POST(request) {
           state.activeDoc.followups[0];
 
         return streamText(firstQuestion);
-      }
-
+      } 
       // No RAG match → General mode
       state.mode = "general";
     }
