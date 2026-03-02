@@ -100,3 +100,13 @@ Open http://localhost:3000 and try the chat UI. Try these patterns to exercise d
 ---
 
 If you want, I can also add a short architecture diagram or expand the `rag.js` documentation.
+
+---
+
+## Screenshots
+
+Below are example screenshots of the web interface:
+
+![Web Page Image 1](/webpageimage1.png)
+
+![Web Page Image 2](/webpageimage2.png)
