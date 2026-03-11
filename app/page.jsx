@@ -10,6 +10,28 @@ const QUICK_ACTIONS = [
   { icon: "😴", label: "Sleep health", prompt: "How can I improve my sleep quality? I've been having trouble sleeping." },
 ];
 
+/* ---------- Session ID helpers ---------- */
+// FIX: Previously the frontend never sent a sessionId, so the backend fell through
+// to "default" and ALL users shared one triage session. Now we generate a UUID once
+// per browser, persist it in localStorage, and send it as a top-level body field.
+function getOrCreateSessionId() {
+  if (typeof window === "undefined") return "ssr-placeholder";
+  let id = localStorage.getItem("mediassist_session_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("mediassist_session_id", id);
+  }
+  return id;
+}
+
+function rotateSessionId() {
+  if (typeof window === "undefined") return;
+  const newId = crypto.randomUUID();
+  localStorage.setItem("mediassist_session_id", newId);
+  return newId;
+}
+
+/* ---------- Sub-components ---------- */
 function TypingDots() {
   return (
     <div style={{ display: "flex", gap: "5px", padding: "4px 0", alignItems: "center" }}>
@@ -28,8 +50,11 @@ function TypingDots() {
 
 function Message({ msg }) {
   const isUser = msg.role === "user";
-  const isEmergency = msg.content?.toLowerCase().includes("911") ||
-    msg.content?.toLowerCase().includes("emergency room");
+  // Improved emergency detection: check for the actual marker we set in the backend
+  const isEmergency =
+    msg.content?.includes("⚠️") ||
+    msg.content?.toLowerCase().includes("emergency services") ||
+    msg.content?.toLowerCase().includes("emergency department");
 
   return (
     <div style={{
@@ -78,15 +103,22 @@ function Message({ msg }) {
   );
 }
 
-
+/* ---------- Main component ---------- */
 export default function HealthChatbot() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [error, setError] = useState("");
+  // FIX: Track sessionId in state so it can be updated on reset without a full page reload
+  const [sessionId, setSessionId] = useState("initializing");
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Initialize sessionId on client (can't access localStorage during SSR)
+  useEffect(() => {
+    setSessionId(getOrCreateSessionId());
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -111,6 +143,9 @@ export default function HealthChatbot() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // FIX: sessionId is now a top-level field, not buried inside messages[0].
+          // The backend reads body.sessionId directly.
+          sessionId,
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
@@ -152,27 +187,23 @@ export default function HealthChatbot() {
   };
 
   const handleKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   const handleReset = async () => {
     if (loading) return;
-  
-    const confirmReset = window.confirm(
-      "Start a new conversation?"
-    );
+
+    const confirmReset = window.confirm("Start a new conversation?");
     if (!confirmReset) return;
-  
-    try {
-      await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: "reset" }]
-        })
-      });
-    } catch {}
-  
+
+    // FIX: Rotate to a new sessionId so the backend creates a fresh session.
+    // The old sessionId's session will naturally expire via the MongoDB TTL index.
+    const newId = rotateSessionId();
+    setSessionId(newId);
+
     setMessages([]);
     setInput("");
     setShowWelcome(true);
@@ -208,6 +239,8 @@ export default function HealthChatbot() {
             </div>
           </div>
         </div>
+        {/* FIX: was showing "Phi-3 Mini" which was neither the model being used nor
+            connected to the actual stack. Now accurately reflects Groq + Llama 3. */}
         <div style={{
           display: "flex", alignItems: "center", gap: 6,
           background: "var(--mint)", padding: "5px 12px",
@@ -217,7 +250,7 @@ export default function HealthChatbot() {
             width: 7, height: 7, borderRadius: "50%", background: "#3fc98a",
             display: "inline-block", animation: "pulse 2s infinite",
           }} />
-          Phi-3 Mini
+          Llama 3 · Groq
           <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }`}</style>
         </div>
       </header>
@@ -296,6 +329,7 @@ export default function HealthChatbot() {
           {messages.map((msg, i) => <Message key={i} msg={msg} />)}
           <div ref={bottomRef} />
         </div>
+
         {/* Floating Reset Button */}
         <button
           onClick={handleReset}
@@ -303,18 +337,16 @@ export default function HealthChatbot() {
             position: "fixed", bottom: 90, right: 24, width: 56, height: 56, borderRadius: "50%",
             border: "none", cursor: "pointer", background: "linear-gradient(135deg, var(--teal), var(--teal-light))",
             color: "white", fontSize: 22, boxShadow: "0 8px 24px rgba(45,138,110,0.35)",
-            display: "flex", alignItems: "center",justifyContent: "center", zIndex: 100,
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100,
             transition: "all 0.25s ease"
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = "scale(1.1)";
-            e.currentTarget.style.boxShadow =
-              "0 12px 30px rgba(45,138,110,0.45)";
+            e.currentTarget.style.boxShadow = "0 12px 30px rgba(45,138,110,0.45)";
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.transform = "scale(1)";
-            e.currentTarget.style.boxShadow =
-              "0 8px 24px rgba(45,138,110,0.35)";
+            e.currentTarget.style.boxShadow = "0 8px 24px rgba(45,138,110,0.35)";
           }}
           title="Start new conversation"
         >
@@ -374,7 +406,7 @@ export default function HealthChatbot() {
           maxWidth: 760, margin: "10px auto 0",
           fontSize: 11, color: "var(--text-muted)", textAlign: "center",
         }}>
-          Powered by Phi-3 Mini via Hugging Face · 🚨 Emergencies: call <strong>911</strong>
+          Powered by Llama 3 via Groq · 🚨 Emergencies: call <strong>911</strong>
         </p>
       </div>
     </div>
